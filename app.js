@@ -2,7 +2,7 @@ const express = require("express");
 const morgan = require("morgan");
 const cors = require("cors");
 const config = require("./config");
-const MongoDB = require("./datacenter/connection");
+const { MongoDB } = require("./datacenter");
 
 const app = express();
 
@@ -16,6 +16,7 @@ app.use(
 app.listen(config.port, async (err) => {
   if (err) {
     console.log("Something went wrong!");
+    return;
   }
 
   await MongoDB.getInstance().connect(config.mongo.uri);
