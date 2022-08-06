@@ -6,7 +6,7 @@ const config = {
   port: process.env.PORT,
   tz: process.env.TZ,
   env: process.env.ENV,
-  db: {
+  mongo: {
     uri: process.env.MONGO_URI,
   },
 };
