@@ -1,7 +1,5 @@
-const utilMiddleware = require("./utils");
-const errorMiddleware = require("./error");
+const auth = require("./auth");
 
 module.exports = {
-  utilMiddleware,
-  errorMiddleware,
+  auth,
 };
