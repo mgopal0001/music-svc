@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const config = require("./config");
 
-const User = new mongoose.Schema(
+const Users = new mongoose.Schema(
   {
     fullname: {
       type: String,
@@ -32,4 +32,4 @@ const User = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("Users", User, "Users");
+module.exports = mongoose.model("Users", Users, "Users");
