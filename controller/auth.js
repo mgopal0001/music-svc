@@ -7,24 +7,23 @@ const { Secrets, Users } = require("../datacenter/models");
 const { OTP } = require("../utils");
 
 class AuthController {
-  static getAccessToken = async (req, res, next) => {
+  static getAccessToken = async (req, res) => {
     try {
-      const uRefrestToken = req.headers["u-refrest-token"];
-
-      if (!uRefrestToken) {
+      const uRefreshToken = req.headers["u-refresh-token"];
+      console.log(uRefreshToken);
+      if (!uRefreshToken) {
         throw new Error("Unauthorized request");
       }
 
-      const decoded = jwt.verify(uRefrestToken, config.jwt.refresh.secret);
-      const hashedToken = await bcrypt.hash(
-        uRefreshToken,
-        config.jwt.refresh.hashRound
-      );
-      const { uuid } = decoded;
+      const decoded = jwt.verify(uRefreshToken, config.jwt.refresh.secret);
+      const { uuid } = decoded.data;
       const { jwtRefreshToken } = await Secrets.findOne({ uuid });
+      const isValid = await bcrypt.compare(uRefreshToken, jwtRefreshToken);
 
-      if (hashedToken === jwtRefreshToken) {
-        const user = Users.findOne({ uuid });
+      console.log(isValid);
+
+      if (isValid) {
+        const user = await Users.findOne({ uuid });
 
         if (!user.isVarified) {
           throw new Error("Unauthorized request");
@@ -40,11 +39,16 @@ class AuthController {
           config.jwt.access.secret
         );
 
+        const hashedAccessToken = await bcrypt.hash(
+          uAccessToken,
+          config.jwt.access.hashRound
+        );
+
         await Secrets.updateOne(
           { uuid },
           {
             $set: {
-              jwtAccessToken: uAccessToken,
+              jwtAccessToken: hashedAccessToken,
             },
           }
         );
@@ -60,6 +64,7 @@ class AuthController {
         throw new Error("Unauthorized request");
       }
     } catch (err) {
+      console.log(err);
       return res.unauthorized({
         message: "Unauthorized",
         data: null,
@@ -68,7 +73,7 @@ class AuthController {
     }
   };
 
-  static login = async (req, res, next) => {
+  static login = async (req, res) => {
     try {
       const { email } = req.body;
       const user = await Users.findOne({ email });
@@ -98,7 +103,7 @@ class AuthController {
    * @param {*} next
    * @returns
    */
-  static logout = async (req, res, next) => {
+  static logout = async (req, res) => {
     try {
       const { uuid } = req.user;
       await Secrets.updateOne(
@@ -106,7 +111,7 @@ class AuthController {
         {
           $set: {
             jwtAccessToken: "",
-            jwtRefrestToken: "",
+            jwtRefreshToken: "",
           },
         }
       );
@@ -121,7 +126,7 @@ class AuthController {
     }
   };
 
-  static signup = async (req, res, next) => {
+  static signup = async (req, res) => {
     try {
       const { fullname, email, adminSecret } = req.body;
 
@@ -166,15 +171,16 @@ class AuthController {
     }
   };
 
-  static sendOTP = async (req, res, next) => {
+  static sendOTP = async (req, res) => {
     try {
       const { email } = req.body;
       const otp = OTP.getOtp();
+      const hashedOtp = await bcrypt.hash(otp, config.jwt.otp.hashRound);
       const otpToken = jwt.sign(
         {
           exp: Math.floor(Date.now() / 1000) + config.jwt.otp.exp,
           data: {
-            otp,
+            otp: hashedOtp,
           },
         },
         config.jwt.otp.secret
@@ -207,6 +213,7 @@ class AuthController {
       await OTP.sendOtp({ otp, from: config.email.from, to: email });
       return res.ok({ message: "Success", data: null, err: null });
     } catch (err) {
+      console.log(err);
       return res.internalServerError({
         message: "Internal Server Error",
         data: null,
@@ -215,9 +222,10 @@ class AuthController {
     }
   };
 
-  static verifyOTP = async (req, res, next) => {
+  static verifyOTP = async (req, res) => {
     try {
       const { email, otp } = req.body;
+      console.log(otp);
       const user = await Users.findOne({ email });
 
       if (!user) {
@@ -232,13 +240,22 @@ class AuthController {
         uuid: user.uuid,
       });
       const decoded = jwt.verify(secret.otp, config.jwt.otp.secret);
+      const isValid = await bcrypt.compare(otp, decoded.data.otp);
 
-      if (otp === decoded.otp) {
+      if (isValid) {
+        await Users.updateOne(
+          { uuid: user.uuid },
+          {
+            $set: {
+              isVarified: true,
+            },
+          }
+        );
         const uAccessToken = jwt.sign(
           {
             exp: Math.floor(Date.now() / 1000) + config.jwt.access.exp,
             data: {
-              uuid,
+              uuid: user.uuid,
             },
           },
           config.jwt.access.secret
@@ -248,7 +265,7 @@ class AuthController {
           {
             exp: Math.floor(Date.now() / 1000) + config.jwt.refresh.exp,
             data: {
-              uuid,
+              uuid: user.uuid,
             },
           },
           config.jwt.refresh.secret
@@ -269,7 +286,7 @@ class AuthController {
           {
             $set: {
               jwtAccessToken: hashedAccessToken,
-              jwtRefrestToken: hashedRefreshToken,
+              jwtRefreshToken: hashedRefreshToken,
             },
           }
         );
@@ -290,6 +307,7 @@ class AuthController {
         });
       }
     } catch (err) {
+      console.log(err);
       return res.internalServerError({
         message: "Internal Server Error",
         data: null,

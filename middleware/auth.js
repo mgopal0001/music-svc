@@ -12,15 +12,12 @@ const auth = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(uAccessToken, config.jwt.access.secret);
-    const hashedToken = await bcrypt.hash(
-      uAccessToken,
-      config.jwt.access.hashRound
-    );
-    const { uuid } = decoded;
+    const { uuid } = decoded.data;
     const { jwtAccessToken } = await Secrets.findOne({ uuid });
+    const isValid = await bcrypt.compare(uAccessToken, jwtAccessToken);
 
-    if (hashedToken === jwtAccessToken) {
-      const user = Users.findOne({ uuid });
+    if (isValid) {
+      const user = await Users.findOne({ uuid });
 
       if (!user.isVarified) {
         throw new Error("Unauthorized request");
@@ -32,6 +29,7 @@ const auth = async (req, res, next) => {
       throw new Error("Unauthorized request");
     }
   } catch (error) {
+    console.log(error);
     return res.unauthorized({
       message: "Unauthorized",
       data: null,
