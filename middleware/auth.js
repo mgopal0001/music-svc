@@ -4,15 +4,18 @@ const bcrypt = require("bcrypt");
 const { Secrets, Users } = require("../datacenter/models");
 
 const auth = async (req, res, next) => {
-  const uAccessToken = req.headers["u-access-token"];
-
-  if (!uAccessToken) {
-    throw new Error("Unauthorized request");
-  }
-
   try {
-    const decoded = jwt.verify(uAccessToken, config.jwt.secret);
-    const hashedToken = await bcrypt.hash(uAccessToken, config.jwt.hashRound);
+    const uAccessToken = req.headers["u-access-token"];
+
+    if (!uAccessToken) {
+      throw new Error("Unauthorized request");
+    }
+
+    const decoded = jwt.verify(uAccessToken, config.jwt.access.secret);
+    const hashedToken = await bcrypt.hash(
+      uAccessToken,
+      config.jwt.access.hashRound
+    );
     const { uuid } = decoded;
     const { jwtAccessToken } = await Secrets.findOne({ uuid });
 

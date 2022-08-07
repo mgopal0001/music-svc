@@ -14,7 +14,7 @@ const Users = new mongoose.Schema(
     },
     isVarified: {
       type: Boolean,
-      required: true,
+      default: false,
     },
     uuid: {
       type: String,

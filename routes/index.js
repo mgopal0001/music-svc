@@ -1,5 +1,6 @@
 const { Router } = require("express");
 const userRoute = require("./user");
+const authRoute = require("./auth");
 const router = Router();
 
 router.get("/", (req, res) => {
@@ -14,6 +15,7 @@ router.get("/", (req, res) => {
 });
 
 router.use("/user", userRoute);
+router.use("/auth", authRoute);
 
 router.use("*", (req, res) => {
   return res.gone({
