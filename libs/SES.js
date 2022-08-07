@@ -1,4 +1,4 @@
-const { SES } = require("aws-sdk");
+const AWS = require("aws-sdk");
 const config = require("../config");
 
 const SES_CONFIG = {
@@ -7,7 +7,7 @@ const SES_CONFIG = {
   region: "ap-south-1",
 };
 
-const ses = new SES(SES_CONFIG);
+const ses = new AWS.SES(SES_CONFIG);
 
 class SES {
   static sendEmail = ({ to, from, body, subject }) => {

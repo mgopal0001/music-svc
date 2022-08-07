@@ -1,16 +1,12 @@
 const mongoose = require("mongoose");
 const config = require("./config");
 
-/**
- * Secrets to hashed and then stored to DB
- */
-
 const Secrets = new mongoose.Schema(
   {
     jwtAccessToken: {
       type: String,
     },
-    jwtRefrestToken: {
+    jwtRefreshToken: {
       type: String,
     },
     otp: {

@@ -3,7 +3,7 @@ dotenv.config();
 
 const config = {
   email: {
-    from: "madan@gmail.com",
+    from: "alert@gurubyuri.com",
   },
   aws: {
     accessKeyId: process.env.ACCESS_KEY_ID,

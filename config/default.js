@@ -21,9 +21,7 @@ const config = {
       exp: 60 * 60 * 96,
     },
     otp: {
-      secret: {
-        verify: process.env.OTP_TOKEN_SECRET,
-      },
+      secret: process.env.OTP_TOKEN_SECRET,
       hashRound: 10,
       exp: 60 * 15,
     },
