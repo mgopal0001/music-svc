@@ -29,6 +29,11 @@ const config = {
   admin: {
     secret: process.env.ADMIN_SECRET,
   },
+  appConfig: {
+    songs: {
+      pageLimit: 50,
+    },
+  },
 };
 
 module.exports = config;
