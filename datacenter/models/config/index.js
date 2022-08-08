@@ -5,6 +5,12 @@ const config = {
       admin: "admin",
     },
   },
+  songs: {
+    rating: {
+      max: 5,
+      min: 0,
+    },
+  },
 };
 
 module.exports = config;
