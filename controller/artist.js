@@ -31,12 +31,47 @@ class ArtistController {
             as: "songs",
           },
         },
+        {
+          $project: {
+            song_artist_map: 0,
+          },
+        },
         { $sort: { _id: -1 } },
       ]);
 
       return res.ok({
         message: "Success",
         data: { offset: skip, artists, size: artists.length },
+        err: null,
+      });
+    } catch (err) {
+      console.log(err);
+      return res.internalServerError({
+        message: "Internal Server Error",
+        data: null,
+        err: new Error("Internal Server Error"),
+      });
+    }
+  };
+
+  static getTopArtists = async (req, res) => {
+    try {
+      const { size } = req.query;
+      const limit = parseInt(size);
+
+      const topArtists = await Artists.aggregate([
+        {
+          $addFields: {
+            avg: { $divide: ["$ratingValue", "$ratingCount"] },
+          },
+        },
+        { $sort: { avg: -1 } },
+        { $limit: limit },
+      ]);
+
+      return res.ok({
+        message: "Success",
+        data: topArtists,
         err: null,
       });
     } catch (err) {

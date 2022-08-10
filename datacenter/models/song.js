@@ -1,27 +1,10 @@
 const mongoose = require("mongoose");
-const config = require("./config");
 
 const Songs = new mongoose.Schema(
   {
     title: {
       type: String,
       required: true,
-    },
-    maxRating: {
-      type: Number,
-      default: config.songs.rating.max,
-    },
-    minRating: {
-      type: Number,
-      default: config.songs.rating.min,
-    },
-    totalRating: {
-      type: Number,
-      default: 0,
-    },
-    ratingCount: {
-      type: Number,
-      default: 0,
     },
     uuid: {
       type: String,
@@ -43,6 +26,14 @@ const Songs = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
+    },
+    ratingValue: {
+      type: Number,
+      default: 0,
+    },
+    ratingCount: {
+      type: Number,
+      default: 0,
     },
   },
   {

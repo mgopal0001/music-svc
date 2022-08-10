@@ -23,6 +23,14 @@ const Artists = new mongoose.Schema(
       required: true,
       unique: true,
     },
+    ratingValue: {
+      type: Number,
+      default: 0,
+    },
+    ratingCount: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,

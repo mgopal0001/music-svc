@@ -1,6 +1,6 @@
 const config = require("../config");
 const { v4: uuidv4 } = require("uuid");
-const { Songs, SongArtistMap } = require("../datacenter/models");
+const { Songs, SongArtistMap, Ratings } = require("../datacenter/models");
 const { S3 } = require("../libs");
 
 class SongController {
@@ -31,12 +31,138 @@ class SongController {
             as: "artists",
           },
         },
+        {
+          $project: {
+            song_artist_map: 0,
+          },
+        },
         { $sort: { _id: -1 } },
       ]);
 
       return res.ok({
         message: "Success",
         data: { offset: skip, songs, size: songs.length },
+        err: null,
+      });
+    } catch (err) {
+      console.log(err);
+      return res.internalServerError({
+        message: "Internal Server Error",
+        data: null,
+        err: new Error("Internal Server Error"),
+      });
+    }
+  };
+
+  static getTopSongs = async (req, res) => {
+    try {
+      const { size } = req.query;
+      const limit = parseInt(size);
+
+      const topSongs = await Songs.aggregate([
+        {
+          $addFields: {
+            avg: { $divide: ["$ratingValue", "$ratingCount"] },
+          },
+        },
+        { $sort: { avg: -1 } },
+        { $limit: limit },
+      ]);
+
+      return res.ok({
+        message: "Success",
+        data: topSongs,
+        err: null,
+      });
+    } catch (err) {
+      console.log(err);
+      return res.internalServerError({
+        message: "Internal Server Error",
+        data: null,
+        err: new Error("Internal Server Error"),
+      });
+    }
+  };
+
+  static rateSong = async (req, res) => {
+    try {
+      const { songId, rating } = req.body;
+      const { uuid } = req.user;
+
+      const ratingObj = await Ratings.findOneAndUpdate(
+        { sid: songId, uuid },
+        {
+          $set: {
+            rating,
+          },
+        },
+        {
+          upsert: true,
+          new: false,
+        }
+      );
+
+      const songArtistMap = await SongArtistMap.find({ sid: songId });
+      const aids = songArtistMap
+        .map((val) => {
+          return {
+            aid: val.aid,
+          };
+        })
+        .filter((val) => {
+          return val.aid;
+        });
+
+      if (ratingObj) {
+        const rt = rating - ratingObj.rating;
+        await Songs.updateOne(
+          { sid: songId },
+          {
+            $inc: {
+              ratingValue: rt,
+              ratingCount: 0,
+            },
+          }
+        );
+
+        if (aids.length) {
+          await Artists.updateMany(
+            { $or: aids },
+            {
+              $inc: {
+                ratingValue: rt,
+                ratingCount: 0,
+              },
+            }
+          );
+        }
+      } else {
+        await Songs.updateOne(
+          { sid: songId },
+          {
+            $inc: {
+              ratingValue: rating,
+              ratingCount: 1,
+            },
+          }
+        );
+
+        if (aids.length) {
+          await Artists.updateMany(
+            { $or: aids },
+            {
+              $inc: {
+                ratingValue: rating,
+                ratingCount: 1,
+              },
+            }
+          );
+        }
+      }
+
+      return res.ok({
+        message: "Success",
+        data: null,
         err: null,
       });
     } catch (err) {
