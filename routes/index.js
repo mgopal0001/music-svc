@@ -2,6 +2,7 @@ const { Router } = require("express");
 const userRoute = require("./user");
 const authRoute = require("./auth");
 const songRoute = require("./song");
+const artistRoute = require("./artist");
 const router = Router();
 
 router.get("/", (req, res) => {
@@ -18,6 +19,7 @@ router.get("/", (req, res) => {
 router.use("/user", userRoute);
 router.use("/auth", authRoute);
 router.use("/song", songRoute);
+router.use("/artist", artistRoute);
 
 router.use("*", (req, res) => {
   return res.gone({

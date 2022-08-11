@@ -33,6 +33,9 @@ const config = {
     songs: {
       pageLimit: 50,
     },
+    artists: {
+      pageLimit: 50,
+    },
   },
 };
 

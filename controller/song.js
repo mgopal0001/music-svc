@@ -1,6 +1,6 @@
 const config = require("../config");
 const { v4: uuidv4 } = require("uuid");
-const { Songs } = require("../datacenter/models");
+const { Songs, SongArtistMap, Ratings } = require("../datacenter/models");
 const { S3 } = require("../libs");
 
 class SongController {
@@ -15,6 +15,27 @@ class SongController {
       const songs = await Songs.aggregate([
         { $skip: skip },
         { $limit: limit },
+        {
+          $lookup: {
+            from: "SongArtistMap",
+            localField: "sid",
+            foreignField: "sid",
+            as: "song_artist_map",
+          },
+        },
+        {
+          $lookup: {
+            from: "Artists",
+            localField: "song_artist_map.aid",
+            foreignField: "aid",
+            as: "artists",
+          },
+        },
+        {
+          $project: {
+            song_artist_map: 0,
+          },
+        },
         { $sort: { _id: -1 } },
       ]);
 
@@ -33,9 +54,130 @@ class SongController {
     }
   };
 
+  static getTopSongs = async (req, res) => {
+    try {
+      const { size } = req.query;
+      const limit = parseInt(size);
+
+      const topSongs = await Songs.aggregate([
+        {
+          $addFields: {
+            avg: { $divide: ["$ratingValue", "$ratingCount"] },
+          },
+        },
+        { $sort: { avg: -1 } },
+        { $limit: limit },
+      ]);
+
+      return res.ok({
+        message: "Success",
+        data: topSongs,
+        err: null,
+      });
+    } catch (err) {
+      console.log(err);
+      return res.internalServerError({
+        message: "Internal Server Error",
+        data: null,
+        err: new Error("Internal Server Error"),
+      });
+    }
+  };
+
+  static rateSong = async (req, res) => {
+    try {
+      const { songId, rating } = req.body;
+      const { uuid } = req.user;
+
+      const ratingObj = await Ratings.findOneAndUpdate(
+        { sid: songId, uuid },
+        {
+          $set: {
+            rating,
+          },
+        },
+        {
+          upsert: true,
+          new: false,
+        }
+      );
+
+      const songArtistMap = await SongArtistMap.find({ sid: songId });
+      const aids = songArtistMap
+        .map((val) => {
+          return {
+            aid: val.aid,
+          };
+        })
+        .filter((val) => {
+          return val.aid;
+        });
+
+      if (ratingObj) {
+        const rt = rating - ratingObj.rating;
+        await Songs.updateOne(
+          { sid: songId },
+          {
+            $inc: {
+              ratingValue: rt,
+              ratingCount: 0,
+            },
+          }
+        );
+
+        if (aids.length) {
+          await Artists.updateMany(
+            { $or: aids },
+            {
+              $inc: {
+                ratingValue: rt,
+                ratingCount: 0,
+              },
+            }
+          );
+        }
+      } else {
+        await Songs.updateOne(
+          { sid: songId },
+          {
+            $inc: {
+              ratingValue: rating,
+              ratingCount: 1,
+            },
+          }
+        );
+
+        if (aids.length) {
+          await Artists.updateMany(
+            { $or: aids },
+            {
+              $inc: {
+                ratingValue: rating,
+                ratingCount: 1,
+              },
+            }
+          );
+        }
+      }
+
+      return res.ok({
+        message: "Success",
+        data: null,
+        err: null,
+      });
+    } catch (err) {
+      console.log(err);
+      return res.internalServerError({
+        message: "Internal Server Error",
+        data: null,
+        err: new Error("Internal Server Error"),
+      });
+    }
+  };
+
   static uploadSong = async (req, res) => {
     try {
-      const { title, dateOfRelease } = req.body;
+      const { title, dateOfRelease, artistIds } = req.body;
       const { uuid } = req.user;
       const sid = uuidv4();
       const dor = new Date(dateOfRelease);
@@ -88,6 +230,15 @@ class SongController {
 
       const imagePath = imageData.Location;
       const audioPath = audioData.Location;
+
+      const saMap = artistIds.map((artistId) => {
+        return {
+          sid,
+          aid: artistId,
+        };
+      });
+
+      await SongArtistMap.insertMany(saMap);
 
       const song = new Songs({
         sid,

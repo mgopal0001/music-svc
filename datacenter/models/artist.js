@@ -1,8 +1,8 @@
 const mongoose = require("mongoose");
 
-const Songs = new mongoose.Schema(
+const Artists = new mongoose.Schema(
   {
-    title: {
+    name: {
       type: String,
       required: true,
     },
@@ -14,15 +14,11 @@ const Songs = new mongoose.Schema(
       type: String,
       default: "",
     },
-    audio: {
-      type: String,
-      required: true,
-    },
-    dor: {
+    dob: {
       type: Date,
       required: true,
     },
-    sid: {
+    aid: {
       type: String,
       required: true,
       unique: true,
@@ -41,4 +37,4 @@ const Songs = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("Songs", Songs, "Songs");
+module.exports = mongoose.model("Artists", Artists, "Artists");

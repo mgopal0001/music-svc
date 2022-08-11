@@ -8,6 +8,7 @@ const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 router.get("/", SongController.getSongs);
+router.get("/top", SongController.getTopSongs);
 router.post(
   "/",
   auth,
@@ -17,5 +18,6 @@ router.post(
   ]),
   SongController.uploadSong
 );
+router.patch("/rate", auth, SongController.rateSong);
 
 module.exports = router;
