@@ -19,5 +19,7 @@ router.post(
   SongController.uploadSong
 );
 router.patch("/rate", auth, SongController.rateSong);
+router.delete("/", auth, SongController.deleteSong);
+router.patch("/update", auth, upload.single("image"), SongController.updateSong);
 
 module.exports = router;

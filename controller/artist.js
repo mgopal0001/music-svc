@@ -1,17 +1,23 @@
 const config = require("../config");
 const { v4: uuidv4 } = require("uuid");
-const { Artists } = require("../datacenter/models");
+const { logger, ArtistValidation } = require('../utils');
+const async = require('async');
+const { Artists, SongArtistMap } = require("../datacenter/models");
 const { S3 } = require("../libs");
 
+/**
+ * Artist controller
+ */
 class ArtistController {
   static getArtists = async (req, res) => {
     try {
-      const { offset, size } = req.query;
-      const skip = parseInt(offset);
-      const limit =
-        size > config.appConfig.artists.pageLimit
-          ? config.appConfig.artists.pageLimit
-          : parseInt(size);
+      const { skip, limit } = ArtistValidation.validateGetArtists({ 
+        offset: req.query.offset, 
+        size: req.query.size, 
+        pageSize: config.appConfig.artists.pageLimit 
+      });
+     
+      const totalArtists = await Artists.countDocuments();
       const artists = await Artists.aggregate([
         { $skip: skip },
         { $limit: limit },
@@ -40,9 +46,149 @@ class ArtistController {
       ]);
 
       return res.ok({
-        message: "Success",
-        data: { offset: skip, artists, size: artists.length },
-        err: null,
+        message: "success",
+        success: true,
+        data: { 
+          offset: skip, 
+          artists, 
+          count: totalArtists
+        },
+      });
+    } catch (err) {
+      console.log(err);
+      return res.internalServerError({
+        message: "Internal Server Error",
+        success: false,
+        err: new Error("Internal Server Error"),
+      });
+    }
+  };
+
+  static getTopArtists = async (req, res) => {
+    try {
+      const { skip, limit } = ArtistValidation.validateGetArtists({ 
+        offset: req.query.offset, 
+        size: req.query.size, 
+        pageSize: config.appConfig.artists.pageLimit 
+      });
+
+      const totalArtists = await Artists.countDocuments();
+      const topArtists = await Artists.aggregate([
+        {
+          $addFields: {
+            avg: { $divide: ["$ratingValue", "$ratingCount"] },
+          },
+        },
+        { $sort: { avg: -1 } },
+        { $skip: skip },
+        { $limit: limit },
+      ]);
+
+      return res.ok({
+        message: "success",
+        success: true,
+        data: {
+          offset: skip,
+          artists: topArtists,
+          count: totalArtists
+        },
+      });
+    } catch (err) {
+      console.log(err);
+      return res.internalServerError({
+        message: "Internal Server Error",
+        success: false,
+        err: new Error("Internal Server Error"),
+      });
+    }
+  };
+
+  static deleteArtist = async (req, res) => {
+    try {
+      const { artistId } = req.body;
+      const { uuid } = req.user;
+
+      async.auto({
+        session: (asyncCb) => {
+          try{
+            const session = await mongoose.startSession();
+            session.startTransaction();
+            return asyncCb(null, session);
+          }catch(err){
+            return asyncCb(err);
+          }
+        },
+        artist: (asyncCb) => {
+          try{
+            const artist = await Artists.findOne({ uuid, aid: artistId });
+            
+            if(!artist){
+              throw new Error("Not found");
+            }
+
+            return asyncCb(null, artist);
+          }catch(err){
+            return asyncCb(err);
+          }
+        },
+        songArtistMap: [
+          "artist",
+          (asyncCb, results) => {
+            try{
+              const songArtistMap = await SongArtistMap.deleteMany(
+                { aid: artistId },
+                {
+                  session: results.session
+                }
+              );
+              return asyncCb(null, songArtistMap);
+            }catch(err){
+              return asyncCb(err);
+            }
+          }
+        ],
+        deleteArtist: [
+          "songArtistMap",
+          (asyncCb, results) => {
+            try{
+              await Artists.deleteOne({ aid: artistId }, {
+                session: results.session
+              });
+            }catch(err){
+              return asyncCb(err);
+            }
+          }
+        ],
+        deleteFile: [
+          "deleteArtist",
+          (asyncCb) => {
+            try{
+              const imageData = await S3.deleteFile(
+                "image/" + artistId + ".jpg",
+                "guru-images-jnvsumit"
+              );
+            }catch(err){
+              return asyncCb(err);
+            }
+          }
+        ]
+      }, (err, results) => {
+        if(err){
+          await results.session.abortTransaction();
+          return res.internalServerError({
+            message: "Internal Server Error",
+            data: null,
+            err: new Error("Internal Server Error"),
+          });
+        }
+
+        console.log(results);
+
+        return res.ok({
+          message: "Success",
+          data: null,
+          err: null,
+        });
       });
     } catch (err) {
       console.log(err);
@@ -54,25 +200,102 @@ class ArtistController {
     }
   };
 
-  static getTopArtists = async (req, res) => {
+  static updateArtist = async (req, res) => {
     try {
-      const { size } = req.query;
-      const limit = parseInt(size);
+      const { artistId } = req.query;
+      const { artistName, dateOfBirth } = req.body;
+      const { uuid } = req.user;
+      const dob = new Date(dateOfBirth);
+      const image = req.file;
 
-      const topArtists = await Artists.aggregate([
-        {
-          $addFields: {
-            avg: { $divide: ["$ratingValue", "$ratingCount"] },
-          },
+      if (!image || !(image.mimetype || "").includes("image")) {
+        return res.forbidden({
+          message: "Please upload a valid image file",
+          data: null,
+          err: null,
+        });
+      }
+
+      if (image.size > 1024 * 1024) {
+        return res.forbidden({
+          message: "Image size must be less than 1 MB",
+          data: null,
+          err: null,
+        });
+      }
+
+      async.auto({
+        session: (asyncCb) => {
+          try{
+            const session = await mongoose.startSession();
+            session.startTransaction();
+            return asyncCb(null, session);
+          }catch(err){
+            return asyncCb(err);
+          }
         },
-        { $sort: { avg: -1 } },
-        { $limit: limit },
-      ]);
+        artist: (asyncCb) => {
+          try{
+            const artist = await Artists.findOne({ uuid, aid: artistId });
+            
+            if(!artist){
+              throw new Error("Not found");
+            }
 
-      return res.ok({
-        message: "Success",
-        data: topArtists,
-        err: null,
+            return asyncCb(null, artist);
+          }catch(err){
+            return asyncCb(err);
+          }
+        },
+        updateArtist: [
+          "rating",
+          (asyncCb, results) => {
+            try{
+              await Artists.updateOne({aid: artistId, uuid}, {
+                $set: {
+                  name: artistName,
+                  dob
+                }
+              }, {
+                session: results.session
+              })
+            }catch(err){
+              return asyncCb(err);
+            }
+          }
+        ],
+        updateFile: [
+          "artist",
+          "updateArtist",
+          (asyncCb, results) => {
+            try{
+              const imageData = await S3.putFile(
+                "image/" + results.artist.aid + ".jpg",
+                image.buffer,
+                "guru-images-jnvsumit"
+              );
+            }catch(err){
+              return asyncCb(err);
+            }
+          }
+        ]
+      }, (err, results) => {
+        if(err){
+          await results.session.abortTransaction();
+          return res.internalServerError({
+            message: "Internal Server Error",
+            data: null,
+            err: new Error("Internal Server Error"),
+          });
+        }
+
+        console.log(results);
+
+        return res.ok({
+          message: "Success",
+          data: null,
+          err: null,
+        });
       });
     } catch (err) {
       console.log(err);

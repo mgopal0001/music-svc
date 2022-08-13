@@ -16,6 +16,10 @@ const Users = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    active: {
+      type: Boolean,
+      default: true,
+    },
     uuid: {
       type: String,
       unique: true,

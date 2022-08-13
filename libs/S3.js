@@ -42,6 +42,23 @@ class S3 {
       });
     });
   }
+
+  static async deleteFile(key, bucketName) {
+    return new Promise((resolve, reject) => {
+      const params = {
+        Bucket: bucketName,
+        Key: key,
+      };
+
+      s3.deleteObject(params, function (err, data) {
+        if (err) {
+          return reject(err);
+        }
+
+        return resolve(data);
+      });
+    });
+  }
 }
 
 module.exports = S3;

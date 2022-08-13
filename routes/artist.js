@@ -9,5 +9,7 @@ const upload = multer({ storage: storage });
 
 router.get("/", ArtistController.getArtists);
 router.post("/", auth, upload.single("image"), ArtistController.uploadArtist);
+router.delete("/", auth, ArtistController.deleteArtist);
+router.patch("/", auth, upload.single("image"), ArtistController.updateArtist);
 
 module.exports = router;
