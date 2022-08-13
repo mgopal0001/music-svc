@@ -9,6 +9,15 @@ const { S3 } = require("../libs");
  * Artist controller
  */
 class ArtistController {
+  /**
+   * Get artists with their songs and rating
+   * @param {*} req 
+   * @param {*} req.query 
+   * @param {number} req.query.offset 
+   * @param {number} req.query.size
+   * @param {*} res 
+   * @returns 
+   */
   static getArtists = async (req, res) => {
     try {
       const { skip, limit } = ArtistValidation.validateGetArtists({ 
@@ -64,6 +73,15 @@ class ArtistController {
     }
   };
 
+  /**
+   * Get top artists by rating
+   * @param {*} req 
+   * @param {*} req.query
+   * @param {number} req.query.offset
+   * @param {number} req.query.size
+   * @param {*} res 
+   * @returns 
+   */
   static getTopArtists = async (req, res) => {
     try {
       const { skip, limit } = ArtistValidation.validateGetArtists({ 
@@ -103,13 +121,21 @@ class ArtistController {
     }
   };
 
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.query 
+   * @param {string} req.query.artistId
+   * @param {*} res 
+   * @returns 
+   */
   static deleteArtist = async (req, res) => {
     try {
-      const { artistId } = req.body;
+      const { artistId } = ArtistValidation.validateDeleteArtist({ artistId: req.query.artistId });
       const { uuid } = req.user;
 
       async.auto({
-        session: (asyncCb) => {
+        session: async (asyncCb) => {
           try{
             const session = await mongoose.startSession();
             session.startTransaction();
@@ -118,7 +144,7 @@ class ArtistController {
             return asyncCb(err);
           }
         },
-        artist: (asyncCb) => {
+        artist: async (asyncCb) => {
           try{
             const artist = await Artists.findOne({ uuid, aid: artistId });
             
@@ -133,7 +159,7 @@ class ArtistController {
         },
         songArtistMap: [
           "artist",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
               const songArtistMap = await SongArtistMap.deleteMany(
                 { aid: artistId },
@@ -141,6 +167,7 @@ class ArtistController {
                   session: results.session
                 }
               );
+
               return asyncCb(null, songArtistMap);
             }catch(err){
               return asyncCb(err);
@@ -149,11 +176,13 @@ class ArtistController {
         ],
         deleteArtist: [
           "songArtistMap",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
               await Artists.deleteOne({ aid: artistId }, {
                 session: results.session
               });
+
+              return asyncCb(null);
             }catch(err){
               return asyncCb(err);
             }
@@ -161,71 +190,77 @@ class ArtistController {
         ],
         deleteFile: [
           "deleteArtist",
-          (asyncCb) => {
+          async (asyncCb) => {
             try{
               const imageData = await S3.deleteFile(
                 "image/" + artistId + ".jpg",
                 "guru-images-jnvsumit"
               );
+
+              return asyncCb(null, imageData);
             }catch(err){
               return asyncCb(err);
             }
           }
         ]
-      }, (err, results) => {
+      }, async (err, results) => {
         if(err){
+          logger.error("Something went wrong", err);
+
           await results.session.abortTransaction();
           return res.internalServerError({
             message: "Internal Server Error",
-            data: null,
+            success: false,
             err: new Error("Internal Server Error"),
           });
         }
 
-        console.log(results);
+        logger.info("Artist deleted successfully");
 
         return res.ok({
-          message: "Success",
-          data: null,
-          err: null,
+          message: "success",
+          data: {
+            artistId
+          },
+          success: true
         });
       });
     } catch (err) {
-      console.log(err);
+      logger.error("Something went wrong", err);
+
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }
   };
 
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.query 
+   * @param {*} req.query.artistId 
+   * @param {*} req.body
+   * @param {*} req.body.artistName
+   * @param {*} req.body.dateOfBirth
+   * @param {*} req.file
+   * @param {*} res 
+   * @returns 
+   */
   static updateArtist = async (req, res) => {
     try {
-      const { artistId } = req.query;
-      const { artistName, dateOfBirth } = req.body;
       const { uuid } = req.user;
-      const dob = new Date(dateOfBirth);
-      const image = req.file;
-
-      if (!image || !(image.mimetype || "").includes("image")) {
-        return res.forbidden({
-          message: "Please upload a valid image file",
-          data: null,
-          err: null,
-        });
-      }
-
-      if (image.size > 1024 * 1024) {
-        return res.forbidden({
-          message: "Image size must be less than 1 MB",
-          data: null,
-          err: null,
-        });
-      }
+      const { artistId, artistName, dateOfBirth, image } = ArtistValidation.validateUpdateArtist({
+        artistId: req.query.artistId,
+        artistName: req.body.artistName,
+        dateOfBirth: req.body.dateOfBirth,
+        image: req.file
+      });
+      const dob = dateOfBirth ? new Date(dateOfBirth) : null;
 
       async.auto({
-        session: (asyncCb) => {
+        session: async (asyncCb) => {
           try{
             const session = await mongoose.startSession();
             session.startTransaction();
@@ -234,7 +269,7 @@ class ArtistController {
             return asyncCb(err);
           }
         },
-        artist: (asyncCb) => {
+        artist: async (asyncCb) => {
           try{
             const artist = await Artists.findOne({ uuid, aid: artistId });
             
@@ -249,16 +284,25 @@ class ArtistController {
         },
         updateArtist: [
           "rating",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
+              const updateObj = {};
+
+              if(artistName) {
+                updateObj["name"] = artistName;
+              }
+
+              if(dob) {
+                updateObj["dob"] = dob;
+              }
+
               await Artists.updateOne({aid: artistId, uuid}, {
-                $set: {
-                  name: artistName,
-                  dob
-                }
+                $set: updateObj
               }, {
                 session: results.session
-              })
+              });
+
+              return asyncCb(null);
             }catch(err){
               return asyncCb(err);
             }
@@ -267,41 +311,49 @@ class ArtistController {
         updateFile: [
           "artist",
           "updateArtist",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
-              const imageData = await S3.putFile(
-                "image/" + results.artist.aid + ".jpg",
-                image.buffer,
-                "guru-images-jnvsumit"
-              );
+              if(image){
+                await S3.putFile(
+                  "image/" + results.artist.aid + ".jpg",
+                  image.buffer,
+                  "guru-images-jnvsumit"
+                  );
+                }
+
+                return asyncCb(null);
             }catch(err){
               return asyncCb(err);
             }
           }
         ]
-      }, (err, results) => {
+      }, async (err, results) => {
         if(err){
+          logger.error("Something went wrong", err);
+
           await results.session.abortTransaction();
           return res.internalServerError({
             message: "Internal Server Error",
-            data: null,
+            success: false,
             err: new Error("Internal Server Error"),
           });
         }
 
-        console.log(results);
+        logger.info("Artist updated", results);
 
         return res.ok({
-          message: "Success",
-          data: null,
-          err: null,
+          message: "success",
+          data: {
+            artistId
+          },
+          success: true,
         });
       });
     } catch (err) {
-      console.log(err);
+      logger.error("Something went wrong", err);
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }
@@ -309,62 +361,108 @@ class ArtistController {
 
   static uploadArtist = async (req, res) => {
     try {
-      const { name, dateOfBirth } = req.body;
       const { uuid } = req.user;
-      const aid = uuidv4();
-      const dob = new Date(dateOfBirth);
-      const image = req.file;
-
-      if (!image || !(image.mimetype || "").includes("image")) {
-        return res.forbidden({
-          message: "Please upload a valid image file",
-          data: null,
-          err: null,
-        });
-      }
-
-      if (image.size > 1024 * 1024) {
-        return res.forbidden({
-          message: "Image size must be less than 1 MB",
-          data: null,
-          err: null,
-        });
-      }
-
-      const imageData = await S3.putFile(
-        "image/" + aid + ".jpg",
-        image.buffer,
-        "guru-images-jnvsumit"
-      );
-
-      const imagePath = imageData.Location;
-
-      const artist = new Artists({
-        aid,
-        uuid,
-        dob,
-        name,
-        image: imagePath,
+      const { artistName, dateOfBirth, image } = ArtistValidation.validateUploadArtist({
+        artistName: req.body.artistName,
+        dateOfBirth: req.body.dateOfBirth,
+        image: req.file
       });
+      const dob = new Date(dateOfBirth);
 
-      await artist.save();
-
-      return res.created({
-        message: "Success",
-        data: {
-          aid,
-          uuid,
-          dateOfBirth: dob,
-          name,
-          image: imagePath,
+      async.auto({
+        session: async (asyncCb) => {
+          try{
+            const session = await mongoose.startSession();
+            session.startTransaction();
+            return asyncCb(null, session);
+          }catch(err){
+            return asyncCb(err);
+          }
         },
-        err: null,
+        saveArtist: [
+          "session",
+          async (asyncCb, results) => {
+            try{
+              const artist = new Artists({
+                aid: uuidv4(),
+                uuid,
+                dob,
+                name: artistName
+              });
+        
+              await artist.save({
+                session: results.session
+              });
+
+              return asyncCb(null, artist);
+            }catch(err){
+              return asyncCb(err);
+            }
+          }
+        ],
+        uploadFile: [
+          "saveArtist",
+          async (asyncCb, results) => {
+            try{
+              const imageData = await S3.putFile(
+                "image/" + results.saveArtist.aid + ".jpg",
+                image.buffer,
+                "guru-images-jnvsumit"
+                );
+
+                return asyncCb(null, imageData);
+            }catch(err){
+              return asyncCb(err);
+            }
+          }
+        ],
+        updateFilePath: [
+          "uploadFile",
+          async (asyncCb, results) => {
+            try{
+              await Artists.updateOne({ aid: results.saveArtist.aid}, {
+                $set: {
+                  image: results.updateFile.Location
+                }
+              });
+
+              return asyncCb(null);
+            }catch(err){
+              return asyncCb(err);
+            }
+          }
+        ]
+      }, async (err, results) => {
+        if(err){
+          logger.error("Something went wrong", err);
+
+          await results.session.abortTransaction();
+          return res.internalServerError({
+            message: "Internal Server Error",
+            success: false,
+            err: new Error("Internal Server Error"),
+          });
+        }
+
+        logger.info("Artist uploaded", results);
+
+        return res.ok({
+          message: "success",
+          data: {
+            artistName,
+            dateOfBirth: dob,
+            image: results.uploadFile.Location,
+            aId: results.saveArtist.aid,
+            uuid
+          },
+          success: true,
+        });
       });
     } catch (err) {
-      console.log(err);
+      logger.error("Something went wrong", err);
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }

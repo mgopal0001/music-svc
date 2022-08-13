@@ -3,16 +3,28 @@ const { v4: uuidv4 } = require("uuid");
 const { Songs, SongArtistMap, Ratings, Users } = require("../datacenter/models");
 const { S3 } = require("../libs");
 const { default: mongoose } = require("mongoose");
+const { ArtistValidation, SongValidation } = require("../utils/validation");
+const { logger } = require("../utils");
 
 class SongController {
+   /**
+   * Get songs with their artists and rating
+   * @param {*} req 
+   * @param {*} req.query 
+   * @param {number} req.query.offset 
+   * @param {number} req.query.size
+   * @param {*} res 
+   * @returns 
+   */
   static getSongs = async (req, res) => {
     try {
-      const { offset, size } = req.query;
-      const skip = parseInt(offset);
-      const limit =
-        size > config.appConfig.songs.pageLimit
-          ? config.appConfig.songs.pageLimit
-          : parseInt(size);
+      const { skip, limit } = ArtistValidation.validateGetArtists({
+        pageSize: config.appConfig.songs.pageLimit,
+        offset: req.query.offset,
+        size: req.query.size
+      });
+
+      const totalSongs = await Songs.countDocuments();
       const songs = await Songs.aggregate([
         { $skip: skip },
         { $limit: limit },
@@ -41,25 +53,38 @@ class SongController {
       ]);
 
       return res.ok({
-        message: "Success",
-        data: { offset: skip, songs, size: songs.length },
-        err: null,
+        message: "success",
+        data: { offset: skip, songs, count: totalSongs },
+        sucess: true,
       });
     } catch (err) {
       console.log(err);
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }
   };
 
+  /**
+   * Get top songs by rating
+   * @param {*} req 
+   * @param {*} req.query
+   * @param {number} req.query.offset
+   * @param {number} req.query.size
+   * @param {*} res 
+   * @returns 
+   */
   static getTopSongs = async (req, res) => {
     try {
-      const { size } = req.query;
-      const limit = parseInt(size);
+      const { skip, limit } = ArtistValidation.validateGetArtists({
+        pageSize: config.appConfig.songs.pageLimit,
+        offset: req.query.offset,
+        size: req.query.size
+      });
 
+      const totalSongs = await Songs.countDocuments();
       const topSongs = await Songs.aggregate([
         {
           $addFields: {
@@ -67,31 +92,49 @@ class SongController {
           },
         },
         { $sort: { avg: -1 } },
+        { $skip: skip },
         { $limit: limit },
       ]);
 
       return res.ok({
-        message: "Success",
-        data: topSongs,
-        err: null,
+        message: "success",
+        data: {
+          songs: topSongs,
+          offset: skip,
+          count: totalSongs
+        },
+        success: true,
       });
     } catch (err) {
-      console.log(err);
+      logger.error("Something went wrong", err);
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }
   };
 
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.body 
+   * @param {*} req.body.userRating 
+   * @param {*} req.query 
+   * @param {*} req.query.songId 
+   * @param {*} res 
+   * @returns 
+   */
   static rateSong = async (req, res) => {
     try {
-      const { songId, userRating } = req.body;
+      const { songId, userRating } = SongValidation.validateRateSong({
+        songId: req.query.songId,
+        userRating: req.body.userRating
+      });
       const { uuid } = req.user;
 
       async.auto({
-        session: (asyncCb) => {
+        session: async (asyncCb) => {
           try{
             const session = await mongoose.startSession();
             session.startTransaction();
@@ -100,7 +143,7 @@ class SongController {
             return asyncCb(err);
           }
         },
-        user: (asyncCb) => {
+        user: async (asyncCb) => {
           try{
             const user = await Users.findOne({ uuid });
             
@@ -115,7 +158,7 @@ class SongController {
         },
         rating: [
           "user",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
               const rating = await Ratings.findOneAndUpdate(
                 { sid: songId, uuid },
@@ -138,7 +181,7 @@ class SongController {
         ],
         aIds: [
           "user",
-          (asyncCb) => {
+          async (asyncCb) => {
             try{
               const songArtistMap = await SongArtistMap.find({ sid: songId });
               const aIds = songArtistMap
@@ -158,7 +201,7 @@ class SongController {
         ],
         updateSongAndArtist: [
           "user",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
               if (results.rating) {
                 const rating = userRating - results.rating.rating;
@@ -210,17 +253,19 @@ class SongController {
                   );
                 }
               }
+
+              return asyncCb(null);
             }catch(err){
               return asyncCb(err);
             }
           }
         ]
-      }, (err, results) => {
+      }, async (err, results) => {
         if(err){
           await results.session.abortTransaction();
           return res.internalServerError({
             message: "Internal Server Error",
-            data: null,
+            success: false,
             err: new Error("Internal Server Error"),
           });
         }
@@ -228,28 +273,38 @@ class SongController {
         console.log(results);
 
         return res.ok({
-          message: "Success",
-          data: null,
-          err: null,
+          message: "success",
+          data: { songId, userRating },
+          success: true,
         });
       });
     } catch (err) {
       console.log(err);
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }
   };
 
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.query 
+   * @param {*} req.query.songId 
+   * @param {*} res 
+   * @returns 
+   */
   static deleteSong = async (req, res) => {
     try {
-      const { songId } = req.body;
+      const { songId } = SongValidation.validateDeleteSong({
+        songId: req.query.songId
+      });
       const { uuid } = req.user;
 
       async.auto({
-        session: (asyncCb) => {
+        session: async (asyncCb) => {
           try{
             const session = await mongoose.startSession();
             session.startTransaction();
@@ -258,7 +313,7 @@ class SongController {
             return asyncCb(err);
           }
         },
-        user: (asyncCb) => {
+        user: async (asyncCb) => {
           try{
             const user = await Users.findOne({ uuid });
             
@@ -273,7 +328,7 @@ class SongController {
         },
         song: [
           "user",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
               const song = await Songs.findOneAndDelete({ sid: songId }, {
                 session: results.session
@@ -287,7 +342,7 @@ class SongController {
         ],
         rating: [
           "user",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
               const rating = await Ratings.deleteMany(
                 { sid: songId },
@@ -303,7 +358,7 @@ class SongController {
         ],
         aIds: [
           "user",
-          (asyncCb) => {
+          async (asyncCb) => {
             try{
               const songArtistMap = await SongArtistMap.find({ sid: songId });
               const aIds = songArtistMap
@@ -323,7 +378,7 @@ class SongController {
         ],
         updateArtists: [
           "user",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
               if (results.aIds.length > 0) {
                 await Artists.updateMany(
@@ -345,7 +400,7 @@ class SongController {
           "user",
           "updateArtists",
           "song",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
               const imageData = await S3.deleteFile(
                 "image/" + results.song.sid + ".jpg",
@@ -361,7 +416,7 @@ class SongController {
             }
           }
         ]
-      }, (err, results) => {
+      }, async (err, results) => {
         if(err){
           await results.session.abortTransaction();
           return res.internalServerError({
@@ -389,32 +444,35 @@ class SongController {
     }
   };
 
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.query 
+   * @param {*} req.query.sondId 
+   * @param {*} req.body 
+   * @param {*} req.body.songTitle 
+   * @param {*} req.body.dateOfRelease 
+   * @param {*} req.body.artistsToAdd 
+   * @param {*} req.body.artistsToDelete 
+   * @param {*} req.file 
+   * @param {*} res 
+   * @returns 
+   */
   static updateSong = async (req, res) => {
     try {
-      const { songId } = req.query;
-      const { title, dateOfRelease, artistsToAdd, artistsToDelete } = req.body;
       const { uuid } = req.user;
+      const { songTitle, dateOfRelease, artistsToAdd, artistsToDelete, songId, image } = SongValidation.validateUpdateSong({
+        songTitle: req.body.songTitle,
+        dateOfRelease: req.body.dateOfRelease,
+        artistsToAdd: req.body.artistsToAdd,
+        artistsToDelete: req.body.artistsToDelete,
+        songId: req.body.songId,
+        image: req.file
+      });
       const dor = new Date(dateOfRelease);
-      const image = req.file;
-
-      if (!image || !(image.mimetype || "").includes("image")) {
-        return res.forbidden({
-          message: "Please upload a valid image file",
-          data: null,
-          err: null,
-        });
-      }
-
-      if (image.size > 1024 * 1024) {
-        return res.forbidden({
-          message: "Image size must be less than 1 MB",
-          data: null,
-          err: null,
-        });
-      }
 
       async.auto({
-        session: (asyncCb) => {
+        session: async (asyncCb) => {
           try{
             const session = await mongoose.startSession();
             session.startTransaction();
@@ -423,7 +481,7 @@ class SongController {
             return asyncCb(err);
           }
         },
-        user: (asyncCb) => {
+        user: async (asyncCb) => {
           try{
             const user = await Users.findOne({ uuid });
             
@@ -438,7 +496,7 @@ class SongController {
         },
         song: [
           "user",
-          (asyncCb) => {
+          async (asyncCb) => {
             try{
               const song = await Songs.findOne({ sid: songId, uuid });
 
@@ -454,7 +512,7 @@ class SongController {
         ],
         aIds: [
           "song",
-          (asyncCb) => {
+          async (asyncCb) => {
             try{
               const aIdsToDelete = [], aIdsToAdd = [];
               const songArtistMap = await SongArtistMap.find({ sid: songId });
@@ -491,7 +549,7 @@ class SongController {
         ],
         rating: [
           "aIds",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
               await Ratings.deleteMany(
                 { $or: results.aIds.aIdsToDelete.map(aId => {
@@ -518,16 +576,25 @@ class SongController {
         ],
         updateSong: [
           "rating",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
+              const updateObj = {};
+
+              if(songTitle){
+                updateObj["title"] = songTitle;
+              }
+
+              if(dor){
+                updateObj["dor"] = dor;
+              }
+
               await Songs.updateOne({sid: songId, uuid}, {
-                $set: {
-                  title,
-                  dor
-                }
+                $set: updateObj
               }, {
                 session: results.session
-              })
+              });
+
+              return asyncCb(null);
             }catch(err){
               return asyncCb(err);
             }
@@ -537,19 +604,23 @@ class SongController {
           "user",
           "updateSong",
           "song",
-          (asyncCb, results) => {
+          async (asyncCb, results) => {
             try{
-              const imageData = await S3.putFile(
-                "image/" + results.song.sid + ".jpg",
-                image.buffer,
-                "guru-images-jnvsumit"
-              );
+              if(image){
+                const imageData = await S3.putFile(
+                  "image/" + results.song.sid + ".jpg",
+                  image.buffer,
+                  "guru-images-jnvsumit"
+                );
+              }
+
+              return asyncCb(null);
             }catch(err){
               return asyncCb(err);
             }
           }
         ]
-      }, (err, results) => {
+      }, async (err, results) => {
         if(err){
           await results.session.abortTransaction();
           return res.internalServerError({
@@ -577,46 +648,31 @@ class SongController {
     }
   };
 
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.body 
+   * @param {*} req.body.songTitle 
+   * @param {*} req.body.dateOfRelease 
+   * @param {*} req.body.artistIds 
+   * @param {*} req.files 
+   * @param {*} req.files.image
+   * @param {*} req.files.audio
+   * @param {*} res 
+   * @returns 
+   */
   static uploadSong = async (req, res) => {
     try {
-      const { title, dateOfRelease, artistIds } = req.body;
+      const { songTitle, dateOfRelease, artistIds, image, audio } = SongValidation.validateUploadSong({
+        songTitle: req.body.songTitle,
+        dateOfRelease: req.body.dateOfRelease,
+        artistIds: req.body.artistIds,
+        image: req.files["image"][0],
+        audio: req.files["audio"][0]
+      });
       const { uuid } = req.user;
       const sid = uuidv4();
       const dor = new Date(dateOfRelease);
-      const image = req.files["image"][0];
-      const audio = req.files["audio"][0];
-
-      if (!image || !(image.mimetype || "").includes("image")) {
-        return res.forbidden({
-          message: "Please upload a valid image file",
-          data: null,
-          err: null,
-        });
-      }
-
-      if (!audio || !(audio.mimetype || "").includes("audio")) {
-        return res.forbidden({
-          message: "Please upload a valid audio file",
-          data: null,
-          err: null,
-        });
-      }
-
-      if (image.size > 1024 * 1024) {
-        return res.forbidden({
-          message: "Image size must be less than 1 MB",
-          data: null,
-          err: null,
-        });
-      }
-
-      if (audio.size > 1024 * 1024 * 10) {
-        return res.forbidden({
-          message: "Audio size must be less than 1 MB",
-          data: null,
-          err: null,
-        });
-      }
 
       const imageData = await S3.putFile(
         "image/" + sid + ".jpg",
@@ -646,7 +702,7 @@ class SongController {
         sid,
         uuid,
         dor,
-        title,
+        title: songTitle,
         image: imagePath,
         audio: audioPath,
       });
@@ -654,22 +710,22 @@ class SongController {
       await song.save();
 
       return res.created({
-        message: "Success",
+        message: "success",
         data: {
           sid,
           uuid,
           dateOfRelease: dor,
-          title,
+          songTitle,
           image: imagePath,
           audio: audioPath,
         },
-        err: null,
+        success: true,
       });
     } catch (err) {
       console.log(err);
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }

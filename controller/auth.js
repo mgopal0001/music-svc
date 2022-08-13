@@ -4,13 +4,19 @@ const config = require("../config");
 const dbConfig = require("../datacenter/models/config");
 const bcrypt = require("bcrypt");
 const { Secrets, Users } = require("../datacenter/models");
-const { OTP } = require("../utils");
+const { OTP, logger, AuthValidation } = require("../utils");
 
 class AuthController {
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.headers 
+   * @param {*} res 
+   * @returns 
+   */
   static getAccessToken = async (req, res) => {
     try {
       const uRefreshToken = req.headers["u-refresh-token"];
-      console.log(uRefreshToken);
       if (!uRefreshToken) {
         throw new Error("Unauthorized request");
       }
@@ -19,8 +25,6 @@ class AuthController {
       const { uuid } = decoded.data;
       const { jwtRefreshToken } = await Secrets.findOne({ uuid });
       const isValid = await bcrypt.compare(uRefreshToken, jwtRefreshToken);
-
-      console.log(isValid);
 
       if (isValid) {
         const user = await Users.findOne({ uuid });
@@ -54,43 +58,58 @@ class AuthController {
         );
 
         return res.ok({
-          message: "Success",
+          message: "success",
           data: {
             uAccessToken,
           },
-          err: null,
+          success: true,
         });
       } else {
-        throw new Error("Unauthorized request");
+        logger.info("Something went wrong");
+        return res.unauthorized({
+          message: "Unauthorized",
+          success: false,
+          err: new Error("Unauthorized request"),
+        });
       }
     } catch (err) {
-      console.log(err);
+      logger.error("Something went wrong", err);
       return res.unauthorized({
         message: "Unauthorized",
-        data: null,
+        success: false,
         err: new Error("Unauthorized request"),
       });
     }
   };
 
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.body 
+   * @param {*} req.body.email 
+   * @param {*} res 
+   * @returns 
+   */
   static login = async (req, res) => {
     try {
-      const { email } = req.body;
+      const { email } = AuthValidation.validateLogin({
+        email: req.body.email
+      });
       const user = await Users.findOne({ email });
 
       if (!user) {
         return res.notFound({
           message: "User doesn't exist",
-          data: null,
-          err: null,
+          success: false,
+          err: new Error("User doesn't exitst"),
         });
       }
 
-      return res.ok({ message: "Success", data: null, err: null });
+      return res.ok({ message: "success", success: true, data: { uuid: user.uuid, email: user.email, fullName: user.fullname } });
     } catch (err) {
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }
@@ -116,64 +135,95 @@ class AuthController {
         }
       );
 
-      return res.ok({ message: "Success", data: null, err: null });
+      return res.ok({
+         message: "success", 
+         data: {
+          message: "You are logged out"
+        }, 
+        success: true 
+      });
     } catch (err) {
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }
   };
 
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.body 
+   * @param {*} req.body.fullName 
+   * @param {*} req.body.email 
+   * @param {*} req.body.adminSecret 
+   * @param {*} res 
+   * @returns 
+   */
   static signup = async (req, res) => {
     try {
-      const { fullname, email, adminSecret } = req.body;
+      const { fullName, email, adminSecret } = AuthValidation.validateSignup({
+        fullName: req.body.fullName,
+        email: req.body.email,
+        adminSecret: req.body.adminSecret
+      });
 
       if (adminSecret && adminSecret !== config.admin.secret) {
         return res.unauthorized({
           message: "Unauthorized",
-          data: null,
+          success: false,
           err: new Error("Unauthorized request"),
         });
       }
+
       const role =
         adminSecret === config.admin.secret
           ? dbConfig.user.roles.admin
           : dbConfig.user.roles.user;
       const uuid = uuidv4();
-
       const iUser = await Users.findOne({ email });
 
       if (iUser) {
         return res.forbidden({
           message: "User already exist",
-          data: null,
-          err: null,
+          success: false,
+          err: new Error("User already exits"),
         });
       }
 
       const user = new Users({
-        fullname,
+        fullname: fullName,
         email,
         role,
         uuid,
       });
 
       await user.save();
-      return res.created({ message: "Success", data: null, err: null });
+      return res.created({ message: "success", data: { fullName, email, uuid }, success: false });
     } catch (err) {
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }
   };
 
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.body 
+   * @param {*} req.body.email 
+   * @param {*} res 
+   * @returns 
+   */
   static sendOTP = async (req, res) => {
     try {
-      const { email } = req.body;
+      const { email } = AuthValidation.validateSendOTP({
+        email: req.body.email
+      });
+
       const otp = OTP.getOtp();
       const hashedOtp = await bcrypt.hash(otp, config.jwt.otp.hashRound);
       const otpToken = jwt.sign(
@@ -190,8 +240,8 @@ class AuthController {
       if (!user) {
         return res.forbidden({
           message: "User not found",
-          data: null,
-          err: null,
+          success: false,
+          err: new Error("User not found"),
         });
       }
 
@@ -211,28 +261,39 @@ class AuthController {
       );
 
       await OTP.sendOtp({ otp, from: config.email.from, to: email });
-      return res.ok({ message: "Success", data: null, err: null });
+      return res.ok({ message: "success", data: { email }, success: true });
     } catch (err) {
-      console.log(err);
+      logger.error("Something went wrong", err);
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }
   };
 
+  /**
+   * 
+   * @param {*} req 
+   * @param {*} req.body 
+   * @param {*} req.body.email 
+   * @param {*} req.body.otp 
+   * @param {*} res 
+   * @returns 
+   */
   static verifyOTP = async (req, res) => {
     try {
-      const { email, otp } = req.body;
-      console.log(otp);
+      const { email, otp } = AuthValidation.validateVerifyOTP({
+        email: req.body.email,
+        otp: req.body.otp
+      });
       const user = await Users.findOne({ email });
 
       if (!user) {
         return res.forbidden({
           message: "User not found",
-          data: null,
-          err: null,
+          success: false,
+          err: new Error("User not found"),
         });
       }
 
@@ -292,25 +353,25 @@ class AuthController {
         );
 
         return res.created({
-          message: "Success",
+          message: "success",
           data: {
             uAccessToken,
             uRefreshToken,
           },
-          err: null,
+          success: true,
         });
       } else {
         return res.forbidden({
           message: "Invalid OTP",
-          data: null,
-          err: null,
+          success: false,
+          err: new Error("Invalid OTP"),
         });
       }
     } catch (err) {
-      console.log(err);
+      logger.error("Something went wrong", err);
       return res.internalServerError({
         message: "Internal Server Error",
-        data: null,
+        success: false,
         err: new Error("Internal Server Error"),
       });
     }
